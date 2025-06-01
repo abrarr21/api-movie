@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/abrarr21/api-movie/internals/data"
+	"github.com/abrarr21/api-movie/internals/validator"
 )
 
 func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Request) {
@@ -20,6 +21,22 @@ func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Reques
 	err := app.readJSON(w, r, &input)
 	if err != nil {
 		app.badRequestResponse(w, r, err) //helper function
+		return
+	}
+
+	//Copy the values from the input struct to a new Movie struct
+	Movie := &data.Movie{
+		Title:   input.Title,
+		Year:    input.Year,
+		Runtime: input.Runtime,
+		Genres:  input.Genres,
+	}
+
+	//an instance of the Validator struct
+	v := validator.New()
+
+	if data.ValidateMovie(v, Movie); !v.Valid() {
+		app.faliedValidationResponse(w, r, v.Errors)
 		return
 	}
 
