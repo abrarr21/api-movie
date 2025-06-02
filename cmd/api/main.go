@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 const version = "1.0.0"
@@ -14,6 +18,12 @@ const version = "1.0.0"
 type config struct {
 	port int
 	env  string
+	db   struct {
+		dsn          string
+		maxOpenConns int
+		maxIdleConns int
+		maxIdleTime  string
+	}
 }
 
 type application struct {
@@ -28,9 +38,23 @@ func main() {
 	// Read the value of the port and env command-line flags into the config struct. We default to using the port number 4000 and the environment "development" if no corresponding flags are provided.
 	flag.IntVar(&cfg.port, "port", 6969, "API Server port")
 	flag.StringVar(&cfg.env, "env", "development", "Environment(development | staging | production)")
+
+	//export DSN="postgres://admin:password@localhost:5432/apimovie?sslmode=disable" in shell
+	flag.StringVar(&cfg.db.dsn, "dsn", os.Getenv("DSN"), "postgres")
+	flag.IntVar(&cfg.db.maxOpenConns, "DB-maxOpenConnections", 25, "postgresSQL max open connections")
+	flag.IntVar(&cfg.db.maxIdleConns, "DB-maxIdleConnections", 25, "postgresSQL max idle connections")
+	flag.StringVar(&cfg.db.maxIdleTime, "DB-max-idle-time", "15m", "postgreSQL max connection idle time")
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime)
+
+	db, err := openDB(cfg)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	defer db.Close()
+	logger.Printf("database connection pool established")
 
 	app := &application{
 		config: cfg,
@@ -49,10 +73,37 @@ func main() {
 	}
 
 	logger.Printf("Starting %s server on %s", cfg.env, srv.Addr)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	logger.Fatal(err)
 }
 
 func (app *application) faliedValidationResponse(w http.ResponseWriter, r *http.Request, errors map[string]string) {
 	app.errorResponse(w, r, http.StatusUnprocessableEntity, errors)
+}
+
+func openDB(cfg config) (*sql.DB, error) {
+	db, err := sql.Open("postgres", cfg.db.dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	db.SetMaxOpenConns(cfg.db.maxOpenConns)
+	db.SetMaxIdleConns(cfg.db.maxIdleConns)
+
+	duration, err := time.ParseDuration(cfg.db.maxIdleTime)
+	if err != nil {
+		return nil, err
+	}
+
+	db.SetConnMaxIdleTime(duration)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = db.PingContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
