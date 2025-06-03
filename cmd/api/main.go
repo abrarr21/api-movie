@@ -10,6 +10,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
 )
 
@@ -55,6 +58,21 @@ func main() {
 
 	defer db.Close()
 	logger.Printf("database connection pool established")
+
+	migrateDriver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		logger.Fatalf("failed to create Postgres migration driver: %v", err)
+	}
+
+	migrator, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", migrateDriver)
+	if err != nil {
+		logger.Fatalf("Failed to initialize migrator: %v", err)
+	}
+
+	err = migrator.Up()
+	if err != nil && err != migrate.ErrNoChange {
+		logger.Fatalf("Failed to apply migrations: %v", err)
+	}
 
 	app := &application{
 		config: cfg,
